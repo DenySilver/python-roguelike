@@ -44,8 +44,8 @@ class Tile:
 class MapGenerator:
     def __init__(self, level):
         self.level = level
-        self.width = 40 + (level // 5) * 5
-        self.height = 40 + (level // 5) * 5
+        self.width = 40 + (level // LEVELS_PER_BIOME) * LEVELS_PER_BIOME
+        self.height = 40 + (level // LEVELS_PER_BIOME) * LEVELS_PER_BIOME
         self.tiles = {}
         self.rooms = []
 
@@ -81,6 +81,7 @@ class MapGenerator:
         connections = []
         visited = {(0,0)}
         stack = [(0,0)]
+        #======
         while stack:
             cx, cy = stack[-1]
             neighbors = []
@@ -96,6 +97,7 @@ class MapGenerator:
                 stack.append((nx, ny))
             else:
                 stack.pop()
+        #======
         for _ in range(int(grid_w * grid_h * MAP_GEN['EXTRA_CONNECTIONS_FACTOR'])):
             rx, ry = random.randint(0, grid_w-1), random.randint(0, grid_h-1)
             dirs = [(0,1), (1,0)]
@@ -105,6 +107,7 @@ class MapGenerator:
                 if ((rx, ry), (nx, ny)) not in connections and ((nx, ny), (rx, ry)) not in connections:
                     connections.append( ((rx, ry), (nx, ny)) )
         rooms_map = {}
+        #======
         for gy in range(grid_h):
             for gx in range(grid_w):
                 rw = random.randint(MAP_GEN['MIN_ROOM_SIZE'], sect_w - 2)
@@ -120,6 +123,7 @@ class MapGenerator:
                 for y in range(room_rect.top, room_rect.bottom):
                     for x in range(room_rect.left, room_rect.right):
                         self.tiles[(x, y)] = Tile(x, y, 'floor')
+        #======
         for (p1, p2) in connections:
             r1 = rooms_map[p1]
             r2 = rooms_map[p2]
@@ -131,6 +135,7 @@ class MapGenerator:
             else:
                 self._tunnel_v(c1[1], c2[1], c1[0])
                 self._tunnel_h(c1[0], c2[0], c2[1])
+        #======
         self._place_walls()
         self._place_doors()
         start_room = random.choice(self.rooms)
@@ -162,6 +167,7 @@ class MapGenerator:
         stack = [(0, 0)]
         visited.add((0, 0))
         adjacency = {}
+        #======
         while stack:
             cx, cy = stack[-1]
             neighbors = []
@@ -186,6 +192,7 @@ class MapGenerator:
                         break
             else:
                 stack.pop()
+        #======
         self._place_walls()
         valid_floors = [k for k, v in self.tiles.items() if v.type == 'floor']
         valid_nodes = list(adjacency.keys())
@@ -193,8 +200,9 @@ class MapGenerator:
             temp_start = random.choice(valid_nodes)
         else:
             temp_start = (0, 0)
-        real_start = self._get_farthest_node(temp_start, adjacency)
-        real_exit = self._get_farthest_node(real_start, adjacency)
+
+        real_start = self._bfs_find_node(temp_start, adjacency)
+        real_exit = self._bfs_find_node(real_start, adjacency)
         path = self._bfs_path(real_start, real_exit, adjacency)
         if not path: path = [real_start, real_exit]
         path_set = set(path)
@@ -202,6 +210,7 @@ class MapGenerator:
         key_colors = [f'key_{i}' for i in range(num_keys)]
         segment_len = len(path) // (num_keys + 1)
         items = []
+        #======
         for i in range(num_keys):
             door_node_idx = (i + 1) * segment_len
             if door_node_idx >= len(path): door_node_idx = len(path) - 1
@@ -218,13 +227,23 @@ class MapGenerator:
             random.shuffle(segment_nodes)
             found_key_pos = None
             for anchor_node in segment_nodes:
-                dead_end = self._find_dead_end(anchor_node, path_set, adjacency)
-                if dead_end:
-                    found_key_pos = dead_end
+                branches = [n for n in adjacency.get(anchor_node, []) if n not in path_set]
+                if branches:
+                    start_branch = random.choice(branches)
+                    forbidden_area = set(path_set)
+                    forbidden_area.add(anchor_node)
+                    found_key_pos = self._bfs_find_node(
+                        start_branch, 
+                        adjacency, 
+                        forbidden=forbidden_area, 
+                        shuffle=True, 
+                        find_dead_end=True
+                    )
                     break
             if not found_key_pos: found_key_pos = segment_nodes[0]
             kx, ky = found_key_pos[0]*2 + 1, found_key_pos[1]*2 + 1
             items.append({'pos': (kx, ky), 'name': f'Ключ {i+1}', 'color': key_colors[i]})
+        #======
         player_start = (real_start[0]*2 + 1, real_start[1]*2 + 1)
         exit_pos = (real_exit[0]*2 + 1, real_exit[1]*2 + 1)
         enemies = []
@@ -233,40 +252,27 @@ class MapGenerator:
             if (ex, ey) in self.tiles and self.tiles[(ex, ey)].type == 'floor':
                 enemies.append((ex, ey))
         return player_start, exit_pos, items, enemies
+        #======
 
-    def _get_farthest_node(self, start_node, adj):
-        queue = [(start_node, 0)]
+    def _bfs_find_node(self, start_node, adj, forbidden=None, shuffle=False, find_dead_end=False):
+        queue = [start_node]
         visited = {start_node}
-        max_dist = 0
-        farthest_node = start_node
-        while queue:
-            curr, dist = queue.pop(0)
-            if dist > max_dist:
-                max_dist = dist
-                farthest_node = curr
-            for neighbor in adj.get(curr, []):
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append((neighbor, dist + 1))
-        return farthest_node
-
-    def _find_dead_end(self, start_node, path_set, adj):
-        branches = [n for n in adj.get(start_node, []) if n not in path_set]
-        if not branches: return None
-        start_branch = random.choice(branches)
-        queue = [start_branch]
-        visited = {start_node, start_branch}
-        last_node = start_branch
+        if forbidden:
+            visited.update(forbidden)
+        last_node = start_node
         while queue:
             curr = queue.pop(0)
             last_node = curr
-            if len(adj.get(curr, [])) == 1: return curr
-            neighbors = adj.get(curr, [])
-            random.shuffle(neighbors)
+            if find_dead_end and len(adj.get(curr, [])) == 1:
+                return curr
+            neighbors = list(adj.get(curr, []))
+            if shuffle:
+                random.shuffle(neighbors)
             for nxt in neighbors:
-                if nxt not in visited and nxt not in path_set:
+                if nxt not in visited:
                     visited.add(nxt)
                     queue.append(nxt)
+        
         return last_node
 
     def _tunnel_h(self, x1, x2, y):
@@ -299,10 +305,10 @@ class MapGenerator:
     def _try_set_door(self, x, y, check_horizontal):
         if (x, y) not in self.tiles: return
         if self.tiles[(x, y)].type != 'floor': return
-        left  = self.tiles.get((x - 1, y))
+        left = self.tiles.get((x - 1, y))
         right = self.tiles.get((x + 1, y))
-        top   = self.tiles.get((x, y - 1))
-        bot   = self.tiles.get((x, y + 1))
+        top = self.tiles.get((x, y - 1))
+        bot = self.tiles.get((x, y + 1))
         if check_horizontal:
             if left and left.type == 'wall' and right and right.type == 'wall':
                 self.tiles[(x, y)] = Tile(x, y, 'door')
