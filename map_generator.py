@@ -276,12 +276,19 @@ class MapGenerator:
         return last_node
 
     def _tunnel_h(self, x1, x2, y):
-        for x in range(min(x1, x2), max(x1, x2)+1): self._dig(x, y)
+        for x in range(min(x1, x2), max(x1, x2)+1): 
+            self._dig(x, y)
+
     def _tunnel_v(self, y1, y2, x):
-        for y in range(min(y1, y2), max(y1, y2)+1): self._dig(x, y)
+        for y in range(min(y1, y2), max(y1, y2)+1): 
+            self._dig(x, y)
+
+    def _set_tile_conditional(self, x, y, new_type, target_check='void'):
+        if (x, y) not in self.tiles or self.tiles[(x, y)].type == target_check:
+            self.tiles[(x, y)] = Tile(x, y, new_type)
+
     def _dig(self, x, y):
-        if (x, y) not in self.tiles: self.tiles[(x, y)] = Tile(x, y, 'void')
-        if self.tiles[(x, y)].type == 'void': self.tiles[(x, y)] = Tile(x, y, 'floor')
+        self._set_tile_conditional(x, y, 'floor', 'void')
 
     def _place_walls(self):
         floor_tiles = [pos for pos, t in self.tiles.items() if t.type == 'floor']
@@ -289,8 +296,7 @@ class MapGenerator:
             for dx in [-1, 0, 1]:
                 for dy in [-1, 0, 1]:
                     nx, ny = x+dx, y+dy
-                    if (nx, ny) not in self.tiles or self.tiles[(nx, ny)].type == 'void':
-                        self.tiles[(nx, ny)] = Tile(nx, ny, 'wall')
+                    self._set_tile_conditional(nx, ny, 'wall', 'void')
 
     def _place_doors(self):
         for room in self.rooms:
